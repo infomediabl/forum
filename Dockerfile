@@ -25,7 +25,6 @@ RUN adduser --system --uid 1001 nextjs
 # Copy standalone output
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public 2>/dev/null || true
 
 # Create writable dirs for runtime data
 RUN mkdir -p notes logs && chown -R nextjs:nodejs notes logs
