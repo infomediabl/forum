@@ -125,7 +125,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     fetchTree();
-  }, [fetchTree]);
+  }, [fetchTree, pathname]);
 
   const handleNavigate = (pagePath: string) => {
     router.push(`/pages/${pagePath}`);

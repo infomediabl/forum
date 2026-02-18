@@ -39,7 +39,7 @@ async function callClaudeWithRetry(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { slugs, context } = body as { slugs: string[]; context: string };
+    const { slugs, context, prompt } = body as { slugs: string[]; context: string; prompt?: string };
 
     if (!slugs || slugs.length === 0) {
       return NextResponse.json({ error: "No pages selected" }, { status: 400 });
@@ -70,19 +70,17 @@ export async function POST(req: NextRequest) {
       )
       .join("\n");
 
-    const userPrompt = `Analyze the following ${pageContents.length} pages and provide a comprehensive analysis with proposals.
-
-${context ? `Project context provided by the user:\n${context}\n\n` : ""}Pages content:
-
-${pagesText}
-
-Please provide:
+    const defaultInstructions = `Please provide:
 1. **Key Patterns & Themes** — Common threads, recurring topics, and shared themes across the pages
 2. **Gaps & Missing Information** — What's missing, incomplete, or could be expanded
 3. **Opportunities & Insights** — Actionable opportunities, connections between pages, and strategic insights
 4. **Proposals** — Concrete recommendations for next steps, improvements, or new directions
 
 Format your response in clean Markdown with clear headings and bullet points.`;
+
+    const userPrompt = prompt
+      ? `${context ? `Project context:\n${context}\n\n` : ""}${prompt}\n\nPages content:\n\n${pagesText}`
+      : `Analyze the following ${pageContents.length} pages and provide a comprehensive analysis with proposals.\n\n${context ? `Project context provided by the user:\n${context}\n\n` : ""}Pages content:\n\n${pagesText}\n\n${defaultInstructions}`;
 
     const client = new Anthropic({ apiKey });
     const response = await callClaudeWithRetry(client, {

@@ -29,6 +29,7 @@ function flattenTree(nodes: TreeNode[], depth: number = 0): FlatPage[] {
 
 export default function AnalysisPage() {
   const [context, setContext] = useState("");
+  const [prompt, setPrompt] = useState("");
   const [pages, setPages] = useState<FlatPage[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [analyzing, setAnalyzing] = useState(false);
@@ -84,6 +85,7 @@ export default function AnalysisPage() {
         body: JSON.stringify({
           slugs: Array.from(selected),
           context,
+          prompt,
         }),
       });
       const data = await res.json();
@@ -152,6 +154,25 @@ export default function AnalysisPage() {
         />
         <span className="absolute bottom-2 right-3 text-xs text-gray-400">
           {context.length}/2000
+        </span>
+      </div>
+
+      {/* Custom prompt */}
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        Prompt (optional)
+      </label>
+      <div className="relative mb-6">
+        <textarea
+          value={prompt}
+          onChange={(e) => {
+            if (e.target.value.length <= 4000) setPrompt(e.target.value);
+          }}
+          placeholder="e.g. Compare conversion rates across all pages and rank them from best to worst..."
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none h-24 focus:outline-none focus:ring-2 focus:ring-gray-300"
+          maxLength={4000}
+        />
+        <span className="absolute bottom-2 right-3 text-xs text-gray-400">
+          {prompt.length}/4000
         </span>
       </div>
 
