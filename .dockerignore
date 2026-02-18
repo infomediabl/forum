@@ -1,0 +1,9 @@
+node_modules
+.next
+notes
+logs
+upload
+.env.local
+.env.local.bak
+.git
+.claude

@@ -25,6 +25,22 @@ function setCache(slug: string, content: string) {
   }
 }
 
+interface TreeNode {
+  name: string;
+  path: string;
+  children: TreeNode[];
+}
+
+function flattenTree(nodes: TreeNode[], prefix = ""): { label: string; path: string }[] {
+  const result: { label: string; path: string }[] = [];
+  for (const node of nodes) {
+    const indent = prefix ? `${prefix} / ${node.name}` : node.name;
+    result.push({ label: indent, path: node.path });
+    result.push(...flattenTree(node.children, indent));
+  }
+  return result;
+}
+
 export default function NotePage() {
   const params = useParams();
   const router = useRouter();
@@ -40,6 +56,13 @@ export default function NotePage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Move page state
+  const [showMove, setShowMove] = useState(false);
+  const [moveTargets, setMoveTargets] = useState<{ label: string; path: string }[]>([]);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [moveLoading, setMoveLoading] = useState(false);
+  const [moveError, setMoveError] = useState("");
+
   const fetchContent = useCallback(async () => {
     const res = await fetch(`/api/notes?slug=${encodeURIComponent(slugStr)}`);
     const data = await res.json();
@@ -53,6 +76,7 @@ export default function NotePage() {
     setTitle(slug[slug.length - 1].replace(/-/g, " "));
     setEditing(false);
     setSaveStatus("idle");
+    setShowMove(false);
 
     const cachedContent = getCached(slugStr);
     if (cachedContent !== null) {
@@ -110,6 +134,47 @@ export default function NotePage() {
     const data = await res.json();
     if (data.newSlug) {
       router.push(`/pages/${data.newSlug}`);
+    }
+  };
+
+  const handleMoveClick = async () => {
+    setShowMove(true);
+    setMoveError("");
+    setMoveTarget("");
+    try {
+      const res = await fetch("/api/notes/tree");
+      const tree: TreeNode[] = await res.json();
+      const flat = flattenTree(tree);
+      // Filter out current page and its children
+      const currentPrefix = slugStr + "/";
+      const filtered = flat.filter(
+        (item) => item.path !== slugStr && !item.path.startsWith(currentPrefix)
+      );
+      setMoveTargets(filtered);
+    } catch {
+      setMoveError("Failed to load page tree");
+    }
+  };
+
+  const handleMoveConfirm = async () => {
+    setMoveLoading(true);
+    setMoveError("");
+    try {
+      const res = await fetch("/api/notes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: slugStr, newParent: moveTarget }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMoveError(data.error || "Move failed");
+      } else if (data.newSlug) {
+        router.push(`/pages/${data.newSlug}`);
+      }
+    } catch {
+      setMoveError("Move failed");
+    } finally {
+      setMoveLoading(false);
     }
   };
 
@@ -174,6 +239,13 @@ export default function NotePage() {
             {editing ? "Preview" : "Edit"}
           </button>
           <button
+            onClick={handleMoveClick}
+            className="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-500 hover:border-gray-400 transition-colors"
+            title="Move page"
+          >
+            Move
+          </button>
+          <button
             onClick={async () => {
               if (!confirm("Delete this page and all its subpages?")) return;
               await fetch(`/api/notes?slug=${encodeURIComponent(slugStr)}`, {
@@ -189,6 +261,43 @@ export default function NotePage() {
           </button>
         </div>
       </div>
+
+      {/* Move panel */}
+      {showMove && (
+        <div className="mb-6 border border-gray-200 rounded-lg p-4 bg-gray-50">
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Move page to...</h3>
+          <select
+            value={moveTarget}
+            onChange={(e) => setMoveTarget(e.target.value)}
+            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-gray-300"
+          >
+            <option value="">(root level)</option>
+            {moveTargets.map((t) => (
+              <option key={t.path} value={t.path}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          {moveError && (
+            <p className="text-xs text-red-500 mb-2">{moveError}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handleMoveConfirm}
+              disabled={moveLoading}
+              className="text-xs px-3 py-1.5 bg-gray-900 text-white rounded hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              {moveLoading ? "Moving..." : "Confirm"}
+            </button>
+            <button
+              onClick={() => setShowMove(false)}
+              className="text-xs px-3 py-1.5 border border-gray-300 rounded text-gray-500 hover:border-gray-400 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Title */}
       <input

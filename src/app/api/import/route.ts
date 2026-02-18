@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { savePageContent, saveImageToPage, createPage } from "@/lib/notes";
+import { parseCSV, csvToMarkdownTable } from "@/lib/csv";
 import fs from "fs";
 import path from "path";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
+const CSV_EXTENSIONS = new Set([".csv"]);
 const CONCURRENCY = 3;
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 15000;
@@ -70,11 +72,13 @@ interface FileGroup {
   slug: string;
   htmlFile: File | null;
   imageFiles: File[];
+  csvFile: File | null;
 }
 
 function groupFiles(files: File[]): { groups: FileGroup[]; unmatched: string[] } {
   const htmlFiles: File[] = [];
   const imageFiles: File[] = [];
+  const csvFiles: File[] = [];
 
   for (const file of files) {
     const ext = getExtension(file.name);
@@ -82,10 +86,12 @@ function groupFiles(files: File[]): { groups: FileGroup[]; unmatched: string[] }
       htmlFiles.push(file);
     } else if (IMAGE_EXTENSIONS.has(ext)) {
       imageFiles.push(file);
+    } else if (CSV_EXTENSIONS.has(ext)) {
+      csvFiles.push(file);
     }
   }
 
-  log(`Grouping: ${htmlFiles.length} HTML files, ${imageFiles.length} image files`);
+  log(`Grouping: ${htmlFiles.length} HTML files, ${imageFiles.length} image files, ${csvFiles.length} CSV files`);
 
   const groups: FileGroup[] = [];
   const matchedImages = new Set<string>();
@@ -104,7 +110,15 @@ function groupFiles(files: File[]): { groups: FileGroup[]; unmatched: string[] }
     }
 
     log(`Group "${baseName}" → slug="${slug}", ${matched.length} image(s): [${matched.map(f => f.name).join(", ")}]`);
-    groups.push({ name: baseName, slug, htmlFile: html, imageFiles: matched });
+    groups.push({ name: baseName, slug, htmlFile: html, imageFiles: matched, csvFile: null });
+  }
+
+  // CSV files create standalone groups
+  for (const csv of csvFiles) {
+    const baseName = getBaseName(csv.name);
+    const slug = baseName.replace(/\s+/g, "-");
+    log(`CSV group "${baseName}" → slug="${slug}"`);
+    groups.push({ name: baseName, slug, htmlFile: null, imageFiles: [], csvFile: csv });
   }
 
   const unmatched = imageFiles
@@ -155,6 +169,33 @@ async function callClaudeWithRetry(
     }
   }
   throw new Error("Max retries exceeded");
+}
+
+async function processCSVGroup(
+  group: FileGroup,
+  index: number,
+  total: number
+): Promise<ImportResult> {
+  const progress = `[${index + 1}/${total}]`;
+
+  if (!group.csvFile) {
+    return { name: group.name, slug: group.slug, success: false, error: "No CSV file" };
+  }
+
+  log(`${progress} Processing CSV "${group.name}"...`);
+
+  const csvText = await group.csvFile.text();
+  const rows = parseCSV(csvText);
+  const table = csvToMarkdownTable(rows);
+  const title = group.name.replace(/-/g, " ");
+  const markdown = `# ${title}\n\n${table}`;
+
+  const slug = [group.slug];
+  createPage(slug);
+  savePageContent(slug, markdown);
+
+  log(`${progress} SUCCESS CSV "${group.name}" (${rows.length} rows)`);
+  return { name: group.name, slug: group.slug, success: true };
 }
 
 async function processGroup(
@@ -321,6 +362,9 @@ export async function POST(req: NextRequest) {
     const tasks = groups.map((group, i) => {
       return async (): Promise<ImportResult> => {
         try {
+          if (group.csvFile) {
+            return await processCSVGroup(group, i, total);
+          }
           return await processGroup(client, group, i, total, explanation);
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : "Unknown error";

@@ -87,6 +87,38 @@ export function saveImageToPage(slug: string[], filename: string, buffer: Buffer
   fs.writeFileSync(path.join(dirPath, filename), buffer);
 }
 
+export function movePage(oldSlug: string[], newParentSlug: string[]): string[] {
+  const pageName = oldSlug[oldSlug.length - 1];
+  const oldPath = path.join(NOTES_DIR, ...oldSlug);
+  const newParentPath = newParentSlug.length > 0 ? path.join(NOTES_DIR, ...newParentSlug) : NOTES_DIR;
+  const newPath = path.join(newParentPath, pageName);
+
+  // Validate source exists
+  if (!fs.existsSync(oldPath)) {
+    throw new Error("Source page does not exist");
+  }
+
+  // Validate not moving into own subtree
+  const oldPrefix = oldSlug.join("/") + "/";
+  const newParentStr = newParentSlug.join("/");
+  if (newParentStr === oldSlug.join("/") || newParentStr.startsWith(oldPrefix)) {
+    throw new Error("Cannot move a page into its own subtree");
+  }
+
+  // Validate no name conflict at destination
+  if (fs.existsSync(newPath)) {
+    throw new Error("A page with that name already exists at the destination");
+  }
+
+  // Ensure parent exists
+  if (!fs.existsSync(newParentPath)) {
+    fs.mkdirSync(newParentPath, { recursive: true });
+  }
+
+  fs.renameSync(oldPath, newPath);
+  return [...newParentSlug, pageName];
+}
+
 export function getImagePath(slug: string[], filename: string): string {
   return path.join(NOTES_DIR, ...slug, filename);
 }

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
-const ACCEPTED_EXTENSIONS = ".html,.htm,.png,.jpg,.jpeg,.gif,.webp";
+const CSV_EXTENSIONS = new Set([".csv"]);
+const ACCEPTED_EXTENSIONS = ".html,.htm,.png,.jpg,.jpeg,.gif,.webp,.csv";
 
 function getExtension(filename: string): string {
   const dot = filename.lastIndexOf(".");
@@ -21,16 +23,19 @@ interface FileGroup {
   slug: string;
   htmlFile: File | null;
   imageFiles: File[];
+  csvFile: File | null;
 }
 
 function computeGroups(files: File[]): { groups: FileGroup[]; unmatched: File[] } {
   const htmlFiles: File[] = [];
   const imageFiles: File[] = [];
+  const csvFiles: File[] = [];
 
   for (const file of files) {
     const ext = getExtension(file.name);
     if (HTML_EXTENSIONS.has(ext)) htmlFiles.push(file);
     else if (IMAGE_EXTENSIONS.has(ext)) imageFiles.push(file);
+    else if (CSV_EXTENSIONS.has(ext)) csvFiles.push(file);
   }
 
   const groups: FileGroup[] = [];
@@ -53,7 +58,14 @@ function computeGroups(files: File[]): { groups: FileGroup[]; unmatched: File[] 
       }
     }
 
-    groups.push({ name: baseName, slug, htmlFile: html, imageFiles: matched });
+    groups.push({ name: baseName, slug, htmlFile: html, imageFiles: matched, csvFile: null });
+  }
+
+  // CSV files create standalone groups
+  for (const csv of csvFiles) {
+    const baseName = getBaseName(csv.name);
+    const slug = baseName.replace(/\s+/g, "-");
+    groups.push({ name: baseName, slug, htmlFile: null, imageFiles: [], csvFile: csv });
   }
 
   const unmatched = imageFiles.filter((img) => !matchedImages.has(img.name));
@@ -68,6 +80,7 @@ interface ImportResult {
 }
 
 export default function ImportPage() {
+  const router = useRouter();
   const [explanation, setExplanation] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -80,7 +93,7 @@ export default function ImportPage() {
   const addFiles = (newFiles: File[]) => {
     const valid = newFiles.filter((f) => {
       const ext = getExtension(f.name);
-      return HTML_EXTENSIONS.has(ext) || IMAGE_EXTENSIONS.has(ext);
+      return HTML_EXTENSIONS.has(ext) || IMAGE_EXTENSIONS.has(ext) || CSV_EXTENSIONS.has(ext);
     });
     setFiles((prev) => {
       const existingNames = new Set(prev.map((f) => f.name));
@@ -131,6 +144,11 @@ export default function ImportPage() {
         setResults([{ name: "Import", slug: "", success: false, error: data.error }]);
       } else {
         setResults(data.results);
+        // Redirect to the first successfully imported page
+        const firstSuccess = (data.results as ImportResult[]).find((r: ImportResult) => r.success && r.slug);
+        if (firstSuccess) {
+          setTimeout(() => router.push(`/pages/${firstSuccess.slug}`), 1500);
+        }
       }
     } catch (err) {
       setResults([
@@ -150,13 +168,14 @@ export default function ImportPage() {
     <div className="max-w-2xl mx-auto px-8 py-10">
       <h1 className="text-2xl font-bold mb-2">Import Files</h1>
       <p className="text-sm text-gray-500 mb-6">
-        Import <strong>.html</strong> files with associated images. Claude AI will
-        convert HTML to Markdown. Images are matched by filename prefix.
+        Import <strong>.html</strong> files with associated images, or <strong>.csv</strong> files.
+        Claude AI converts HTML to Markdown. CSV files are converted to markdown tables directly.
+        Images are matched by filename prefix.
       </p>
 
       {/* Explanation */}
       <label className="block text-sm font-medium text-gray-700 mb-1">
-        Instructions for Claude (optional)
+        Instructions for Claude (optional, applies to HTML imports only)
       </label>
       <textarea
         value={explanation}
@@ -195,7 +214,7 @@ export default function ImportPage() {
           <span className="text-gray-800 underline">browse</span>
         </p>
         <p className="text-xs text-gray-400 mt-1">
-          HTML, PNG, JPG, GIF, WebP
+          HTML, PNG, JPG, GIF, WebP, CSV
         </p>
         <input
           ref={inputRef}
@@ -217,6 +236,8 @@ export default function ImportPage() {
             {files.map((file, i) => {
               const ext = getExtension(file.name);
               const isHtml = HTML_EXTENSIONS.has(ext);
+              const isCsv = CSV_EXTENSIONS.has(ext);
+              const dotColor = isHtml ? "bg-blue-400" : isCsv ? "bg-orange-400" : "bg-green-400";
               return (
                 <li
                   key={`${file.name}-${i}`}
@@ -224,9 +245,7 @@ export default function ImportPage() {
                 >
                   <span className="flex items-center gap-2 truncate">
                     <span
-                      className={`inline-block w-2 h-2 rounded-full ${
-                        isHtml ? "bg-blue-400" : "bg-green-400"
-                      }`}
+                      className={`inline-block w-2 h-2 rounded-full ${dotColor}`}
                     />
                     <span className="text-gray-700 truncate">{file.name}</span>
                     <span className="text-gray-400 text-xs">
@@ -280,18 +299,27 @@ export default function ImportPage() {
                   <span className="text-xs text-gray-400">→ /pages/{group.slug}</span>
                 </div>
                 <div className="text-xs text-gray-500">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
-                    {group.htmlFile?.name}
-                  </span>
-                  {group.imageFiles.length > 0 && (
-                    <span className="ml-3">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
-                        {group.imageFiles.length} image
-                        {group.imageFiles.length !== 1 ? "s" : ""}
-                      </span>
+                  {group.csvFile ? (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />
+                      CSV → markdown table
                     </span>
+                  ) : (
+                    <>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
+                        {group.htmlFile?.name}
+                      </span>
+                      {group.imageFiles.length > 0 && (
+                        <span className="ml-3">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
+                            {group.imageFiles.length} image
+                            {group.imageFiles.length !== 1 ? "s" : ""}
+                          </span>
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

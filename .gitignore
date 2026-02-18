@@ -4,6 +4,6 @@ node_modules/
 .env.local.bak
 logs/
 upload/
-notes/
+/notes/
 tsconfig.tsbuildinfo
 next-env.d.ts
